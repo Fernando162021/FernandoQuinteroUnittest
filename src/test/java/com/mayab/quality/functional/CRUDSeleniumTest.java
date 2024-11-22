@@ -1,4 +1,4 @@
-package com.mayab.quality.unittest.functional;
+package com.mayab.quality.functional;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
