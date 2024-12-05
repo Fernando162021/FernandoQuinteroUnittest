@@ -1,0 +1,126 @@
+version: 2.1
+
+jobs:
+  test-java:
+    docker:
+      - image: cimg/openjdk:17.0
+      - image: cimg/mysql:8.0
+        environment:
+          MYSQL_ROOT_PASSWORD: 123456
+          MYSQL_DATABASE: dbunit
+        
+    steps:
+      - checkout
+      - run:
+          name: Waiting for MySQL to be ready
+          command: |
+            for i in `seq 1 10`;
+            do
+              nc -z 127.0.0.1 3306 && echo Success && exit 0
+              echo -n .
+              sleep 1
+            done
+            echo Failed waiting for MySQL && exit 1
+
+      - run:
+          name: Install MySQL and import schema
+          command: |
+            sudo apt update && sudo apt install default-mysql-client
+            echo "SOURCE src/test/resources/schema.sql;" | mysql -h 127.0.0.1 -uroot -p123456 dbunit
+            echo "Checking tables in dbunit..."
+            mysql -h 127.0.0.1 -uroot -p123456 dbunit -e "SHOW TABLES;"
+            echo "SELECT * FROM usuarios;" | mysql -h 127.0.0.1 -uroot -p123456 dbunit
+            echo "done"
+         
+      - run:
+          name: Calculate cache key
+          command: |-
+            find . -name 'pom.xml' -o -name 'gradlew*' -o -name '*.gradlew*' | \
+              sort | xargs cat > /tmp/CIRCLECI_CACHE_KEY
+      - restore_cache:
+          key: cache-{{ checksum "/tmp/CIRCLECI_CACHE_KEY" }}
+            
+      - run:
+          name: Installing browser
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y wget gnupg
+            wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable
+
+      - run:
+          name: Configure Git
+          command: |
+            git pull origin $CIRCLE_BRANCH
+            git config credential.helper 'cache --timeout=120'
+            git config user.name "Fernando162021"
+            git config user.email "fernandoquinteromps@outlook.com"
+
+      - run:
+          name: Clean screenshots and create directory
+          command: |
+            rm -rf src/test/resources/screenshots/*
+            mkdir -p workspace
+
+      - run:
+          name: Testing
+          command: mvn test && echo "export RESULT=success" >> $BASH_ENV || echo "export RESULT=failure" >> $BASH_ENV
+
+      - run:
+          name: Print RESULT
+          command: echo "Test $RESULT"
+
+      - store_artifacts:
+          path: src/test/resources/screenshots
+          destination: screenshots
+
+      - run:
+          name: Verify changes
+          command: |
+            if [ -d "src/test/resources/screenshots" ]; then
+              git add src/test/resources/screenshots
+              git commit -m "Test screenshots [skip ci]" || echo "No changes to commit"
+              git push -q https://Fernando162021:$GH_TOKEN@github.com/Fernando162021/FernandoQuinteroUnittest.git $CIRCLE_BRANCH
+            else
+              echo "No screenshots"
+            fi
+
+      - run: pwd
+      - run: ls -aR ~/
+      - persist_to_workspace:
+          root: .
+          paths:
+            - src/test/resources/screenshots
+      - run:
+          name: Deploy if tests success
+          command: |
+            if [ "$RESULT" = "failure" ]; then
+              echo "ERROR."
+              exit 1
+            fi
+            echo "Test passed. Deploying..."
+
+      - store_test_results:
+          path: target/surefire-reports
+      - save_cache:
+          key: cache-{{ checksum "/tmp/CIRCLECI_CACHE_KEY" }}
+          paths:
+            - ~/.m2/repository
+
+  deploy:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: deploy
+          command: echo "deploy"
+
+workflows:
+  build-and-test:
+    jobs:
+      - test-java
+      - deploy:
+          requires:
+            - test-java
