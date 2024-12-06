@@ -263,7 +263,7 @@ class UserServiceTest {
 		//Verification
 		assertThat(result, is(new ArrayList<>(db.values())));
         assertThat(result, hasSize(2));
-        assertThat(result.get(0).getName(), is("John Doe"));
+        assertThat(result.get(1).getName(), is("John Doe"));
         assertThat(result.get(1).getName(), is("Jane Smith"));
 		 
 	}
